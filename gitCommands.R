@@ -14,7 +14,7 @@ git status
 git add .
 
 
-git commit -m "Updated WithoutAPI and have completed NFL and NBA"
+git commit -m "Updated WithoutAPI and have completed NFL and NBA and NHL"
 
 
 git push origin main
