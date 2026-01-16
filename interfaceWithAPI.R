@@ -1,10 +1,3 @@
-#sportsScheduler Interface
-#January 2026
-#J Stalnaker
-
-#Load requisite packages
-source("packages.R")
-
 # Daily “what’s on” schedule for:
 # EPL, Bundesliga, UEFA Champions League, MLB, NBA, NFL, NHL
 
