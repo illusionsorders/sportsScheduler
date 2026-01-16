@@ -3,7 +3,7 @@
 Schedules<-list()
 
 # NFL ---------------------------------------------------------------------
-#NFL Schedule Compilation
+#NFL Schedule Compiler
 
 library(nflreadr)
 library(dplyr)
@@ -37,7 +37,7 @@ Schedules$NFL <- sched_nfl
 rm(sched_nfl)
 
 # NBA ---------------------------------------------------------------------
-#NBA Schedule Compilation
+#NBA Schedule Compiler
 
 library(hoopR)
 library(dplyr)
@@ -68,4 +68,76 @@ sched_nba <- load_nba_schedule(seasons = current_season) %>%
 
 Schedules$NBA <- sched_nba
 rm(sched_nba)
+
+
+
+# NHL ---------------------------------------------------------------------
+# NHL Schedule Compiler
+
+library(httr)
+library(jsonlite)
+library(lubridate)
+library(dplyr)
+
+
+raw <- fromJSON(
+  content(
+    GET("https://api-web.nhle.com/v1/schedule/now"),
+    "text",
+    encoding = "UTF-8"
+  ),
+  flatten = TRUE
+)
+
+# IMPORTANT: safely bind all games (handles mismatched columns)
+games <- bind_rows(raw$gameWeek$games)
+
+# -----------------------------
+# BUILD FLAT NHL SCHEDULE
+# -----------------------------
+sched_nhl <- data.frame(
+  Date = as.Date(
+    with_tz(
+      as.POSIXct(games$startTimeUTC, tz = "UTC"),
+      "America/Los_Angeles"
+    )
+  ),
+  Time = format(
+    with_tz(
+      as.POSIXct(games$startTimeUTC, tz = "UTC"),
+      "America/Los_Angeles"
+    ),
+    "%H:%M"
+  ),
+  Away = paste(
+    games$awayTeam.placeName.default,
+    games$awayTeam.commonName.default
+  ),
+  Home = paste(
+    games$homeTeam.placeName.default,
+    games$homeTeam.commonName.default
+  ),
+  Location = as.character(games$venue.default),
+  stringsAsFactors = FALSE
+)
+
+# -----------------------------
+# SCHEMA GUARD (FAIL FAST)
+# -----------------------------
+stopifnot(
+  nrow(sched_nhl) > 0,
+  ncol(sched_nhl) == 5,
+  identical(
+    names(sched_nhl),
+    c("Date", "Time", "Away", "Home", "Location")
+  )
+)
+
+# -----------------------------
+# STORE
+# -----------------------------
+Schedules$NHL <- sched_nhl
+rm(sched_nhl)
+
+
 
