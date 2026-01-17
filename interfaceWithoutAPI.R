@@ -49,7 +49,6 @@ season <- if (month(today) < 7) year(today) else year(today) + 1
 
 nba_raw <- espn_nba_scoreboard(season = season)
 
-# pick venue column safely
 venue_col <- intersect(
   c("venue_full_name", "arena_name", "arena.name"),
   names(nba_raw)
@@ -85,7 +84,6 @@ library(httr)
 library(jsonlite)
 library(lubridate)
 
-# 1. Get the data
 res <- GET("https://api-web.nhle.com/v1/schedule/now")
 raw <- fromJSON(content(res, "text", encoding = "UTF-8"), flatten = FALSE)
 
@@ -128,14 +126,11 @@ Schedules$NHL <-sched_nhl
 # MLB ---------------------------------------------------------------------
 #MLB Scheduler Compiler
 
-# determine current season
 today <- Sys.Date()
 yr <- as.integer(format(today, "%Y"))
 
-# pull MLB schedule
 mlb_raw <- mlb_schedule(season = yr)
 
-# build flat MLB schedule
 sched_mlb <- mlb_raw %>%
   mutate(
     game_datetime = with_tz(
@@ -152,7 +147,6 @@ sched_mlb <- mlb_raw %>%
   ) %>%
   as.data.frame(stringsAsFactors = FALSE)
 
-# schema guard (fail fast)
 stopifnot(
   nrow(sched_mlb) > 0,
   ncol(sched_mlb) == 5,
@@ -183,7 +177,6 @@ mls_raw <- tryCatch(
 
 if (is.null(mls_raw) || nrow(mls_raw) == 0) {
   
-  # explicit placeholder row
   sched_mls <- data.frame(
     Date = as.Date("1900-01-01"),
     Time = "00:00",
