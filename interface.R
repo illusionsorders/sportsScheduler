@@ -1,6 +1,6 @@
 #sportsScheduler Interface
 #January 2026
-#J Stalnaker
+#Illusions Orders
 
 #Load requisite packages
 source("packages.R")

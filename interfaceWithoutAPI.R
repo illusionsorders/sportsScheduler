@@ -1,13 +1,18 @@
-#Utilize existing R packages
+#Free Daily sports compiler not beholden to a master API
+#January 2026
+#Illusions Orders
 
 Schedules<-list()
-
-# NFL ---------------------------------------------------------------------
-#NFL Schedule Compiler
 
 library(nflreadr)
 library(dplyr)
 library(lubridate)
+library(hoopR)
+library(baseballr)
+library(worldfootballR)
+
+# NFL ---------------------------------------------------------------------
+#NFL Schedule Compiler
 
 today <- Sys.Date()
 yr <- as.integer(format(today, "%Y"))
@@ -39,35 +44,39 @@ rm(sched_nfl)
 # NBA ---------------------------------------------------------------------
 #NBA Schedule Compiler
 
-library(hoopR)
-library(dplyr)
-library(lubridate)
-
 today <- Sys.Date()
-yr <- as.integer(format(today, "%Y"))
-mo <- as.integer(format(today, "%m"))
-current_season <- if (mo < 7) yr else yr + 1
+season <- if (month(today) < 7) year(today) else year(today) + 1
 
-sched_nba <- load_nba_schedule(seasons = current_season) %>%
+nba_raw <- espn_nba_scoreboard(season = season)
+
+# pick venue column safely
+venue_col <- intersect(
+  c("venue_full_name", "arena_name", "arena.name"),
+  names(nba_raw)
+)
+
+sched_nba <- nba_raw %>%
   mutate(
-    game_date_time = force_tz(
-      as.POSIXct(game_date_time),
-      "America/New_York"
-    )
-  ) %>%
-  transmute(
-    Date = as.Date(game_date_time),
-    Time = format(
-      with_tz(game_date_time, "America/Los_Angeles"),
-      "%H:%M"
+    game_dt = as.POSIXct(
+      game_date,
+      format = "%Y-%m-%dT%H:%MZ",
+      tz = "UTC"
     ),
-    Away = away_abbreviation,
-    Home = home_abbreviation,
-    Location = venue_full_name
+    local_dt = with_tz(game_dt, "America/Los_Angeles")
+  ) %>%
+  filter(as.Date(local_dt) == today) %>%
+  transmute(
+    Date = as.Date(local_dt),
+    Time = format(local_dt, "%H:%M"),
+    Away = away_team_abb,
+    Home = home_team_abb,
+    Location = if (length(venue_col) == 1)
+      .data[[venue_col]]
+    else
+      "Unknown Arena"
   )
 
-Schedules$NBA <- sched_nba
-rm(sched_nba)
+Schedules$NBA<-sched_nba
 
 # NHL ---------------------------------------------------------------------
 # NHL Schedule Compiler
@@ -82,7 +91,7 @@ raw <- fromJSON(content(res, "text", encoding = "UTF-8"), flatten = FALSE)
 
 target_date <- as.character(Sys.Date())
 day_index <- which(raw$gameWeek$date == target_date)
-if (length(day_index) == 0) day_index <- 1  
+stopifnot(length(day_index) == 1)
 
 games <- raw$gameWeek$games[[day_index]]
 
@@ -106,7 +115,7 @@ sched_nhl <- sched_nhl[order(sched_nhl$Time), ]
 if (nrow(sched_nhl) == 0) {
   sched_nhl <- data.frame(
     Date = as.Date("1900-01-01"),
-    Time = "12:00 AM",
+    Time = "00:00",
     Away = "Place",
     Home = "Holder",
     Location = "Placeholder Arena",
@@ -118,10 +127,6 @@ Schedules$NHL <-sched_nhl
 
 # MLB ---------------------------------------------------------------------
 #MLB Scheduler Compiler
-
-library(baseballr)
-library(dplyr)
-library(lubridate)
 
 # determine current season
 today <- Sys.Date()
@@ -162,10 +167,6 @@ rm(sched_mlb, mlb_raw)
 
 # MLS ---------------------------------------------------------------------
 #MLS Schedule Compiler
-
-library(worldfootballR)
-library(dplyr)
-library(lubridate)
 
 today <- Sys.Date()
 yr <- as.integer(format(today, "%Y"))
@@ -240,22 +241,34 @@ Schedules <- lapply(Schedules, function(x) {
 nfl_lookup <- readRDS("nfl_team_lookup.rds")
 nba_lookup <- readRDS("nba_team_lookup.rds")
 
-Schedules$NFL$Away <- nfl_lookup$Full[
-  match(Schedules$NFL$Away, nfl_lookup$Abbr)
-] %||% Schedules$NFL$Away
+Schedules$NFL$Away <- coalesce(
+  nfl_lookup$Full[match(Schedules$NFL$Away, nfl_lookup$Abbr)],
+  Schedules$NFL$Away
+)
 
-Schedules$NFL$Home <- nfl_lookup$Full[
-  match(Schedules$NFL$Home, nfl_lookup$Abbr)
-] %||% Schedules$NFL$Home
+Schedules$NFL$Home <- coalesce(
+  nfl_lookup$Full[match(Schedules$NFL$Home, nfl_lookup$Abbr)],
+  Schedules$NFL$Home
+)
 
-Schedules$NBA$Away <- nba_lookup$Full[
-  match(Schedules$NBA$Away, nba_lookup$Abbr)
-] %||% Schedules$NBA$Away
+Schedules$NBA$Home <- trimws(as.character(Schedules$NBA$Home))
+Schedules$NBA$Away <- trimws(as.character(Schedules$NBA$Away))
 
-Schedules$NBA$Home <- nba_lookup$Full[
-  match(Schedules$NBA$Home, nba_lookup$Abbr)
-] %||% Schedules$NBA$Home
+stopifnot("ESPN_Abbr" %in% names(nba_lookup))
 
+Schedules$NBA$Home <- coalesce(
+  nba_lookup$Full[
+    match(Schedules$NBA$Home, nba_lookup$ESPN_Abbr)
+  ],
+  Schedules$NBA$Home
+)
+
+Schedules$NBA$Away <- coalesce(
+  nba_lookup$Full[
+    match(Schedules$NBA$Away, nba_lookup$ESPN_Abbr)
+  ],
+  Schedules$NBA$Away
+)
 nhl_lookup <- readRDS("nhl_team_lookup.rds")
 
 Schedules$NHL$Away <- coalesce(
@@ -282,11 +295,18 @@ Schedules <- lapply(Schedules, function(df) {
   df
 })
 
+stopifnot(
+  all(sapply(Schedules, function(x) {
+    identical(names(x), c("Date", "Time", "Away", "Home", "Location"))
+  }))
+)
+
 Schedules$Master <- bind_rows(Schedules, .id = "League")
 
-Schedules$Master$Time <- format(
-  strptime(Schedules$Master$Time, "%H:%M"),
-  "%I:%M %p"
+Schedules$Master$Time <- ifelse(
+  grepl("AM|PM", Schedules$Master$Time),
+  Schedules$Master$Time,
+  format(strptime(Schedules$Master$Time, "%H:%M"), "%I:%M %p")
 )
 
 # Today Listing -----------------------------------------------------------
@@ -306,7 +326,5 @@ Schedules$Today <- Schedules$Master %>%
 rm(list = setdiff(ls(), "Schedules"))
 todaysListing<-Schedules$Today
 print(todaysListing)
-
-
 
 
