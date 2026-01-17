@@ -113,7 +113,25 @@ if(!require(openxlsx)){
   install.packages("openxlsx")
   library(openxlsx)}
 
+if(!require(nflreadr)){ 
+  install.packages("nflreadr")
+  library(nflreadr)}
 
+if(!require(hoopR)){ 
+  install.packages("hoopR")
+  library(hoopR)}
+
+if(!require(nhlscraper)){ 
+  install.packages("nhlscraper")
+  library(nhlscraper)}
+
+if(!require(baseballr)){ 
+  install.packages("baseballr")
+  library(baseballr)}
+
+if(!require(worldfootballR)){ 
+  install.packages("worldfootballR")
+  library(worldfootballR)}
 
 #to run paralleled code
 cores<-detectCores()

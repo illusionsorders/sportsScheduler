@@ -92,9 +92,7 @@ raw <- fromJSON(
 # IMPORTANT: safely bind all games (handles mismatched columns)
 games <- bind_rows(raw$gameWeek$games)
 
-# -----------------------------
-# BUILD FLAT NHL SCHEDULE
-# -----------------------------
+
 sched_nhl <- data.frame(
   Date = as.Date(
     with_tz(
@@ -121,9 +119,7 @@ sched_nhl <- data.frame(
   stringsAsFactors = FALSE
 )
 
-# -----------------------------
-# SCHEMA GUARD (FAIL FAST)
-# -----------------------------
+
 stopifnot(
   nrow(sched_nhl) > 0,
   ncol(sched_nhl) == 5,
@@ -133,11 +129,122 @@ stopifnot(
   )
 )
 
-# -----------------------------
-# STORE
-# -----------------------------
 Schedules$NHL <- sched_nhl
-rm(sched_nhl)
+rm(sched_nhl, games, raw)
 
+
+# MLB ---------------------------------------------------------------------
+#MLB Scheduler Compiler
+
+library(baseballr)
+library(dplyr)
+library(lubridate)
+
+# determine current season
+today <- Sys.Date()
+yr <- as.integer(format(today, "%Y"))
+
+# pull MLB schedule
+mlb_raw <- mlb_schedule(season = yr)
+
+# build flat MLB schedule
+sched_mlb <- mlb_raw %>%
+  mutate(
+    game_datetime = with_tz(
+      as.POSIXct(game_date, tz = "UTC"),
+      "America/Los_Angeles"
+    )
+  ) %>%
+  transmute(
+    Date = as.Date(game_datetime),
+    Time = format(game_datetime, "%H:%M"),
+    Away = teams_away_team_name,
+    Home = teams_home_team_name,
+    Location = venue_name
+  ) %>%
+  as.data.frame(stringsAsFactors = FALSE)
+
+# schema guard (fail fast)
+stopifnot(
+  nrow(sched_mlb) > 0,
+  ncol(sched_mlb) == 5,
+  identical(
+    names(sched_mlb),
+    c("Date", "Time", "Away", "Home", "Location")
+  )
+)
+
+# store
+Schedules$MLB <- sched_mlb
+rm(sched_mlb, mlb_raw)
+
+
+# MLS ---------------------------------------------------------------------
+#MLS Schedule Compiler
+
+library(worldfootballR)
+library(dplyr)
+library(lubridate)
+
+today <- Sys.Date()
+yr <- as.integer(format(today, "%Y"))
+
+mls_raw <- tryCatch(
+  fb_match_results(
+    country = "USA",
+    gender = "M",
+    tier = "1",
+    season_end_year = yr
+  ),
+  error = function(e) NULL
+)
+
+if (is.null(mls_raw) || nrow(mls_raw) == 0) {
+  
+  # explicit placeholder row
+  sched_mls <- data.frame(
+    Date = as.Date("1900-01-01"),
+    Time = "00:00",
+    Away = "Place",
+    Home = "Holder",
+    Location = "Placeholder Field",
+    stringsAsFactors = FALSE
+  )
+  
+} else {
+  
+  sched_mls <- mls_raw %>%
+    mutate(
+      game_datetime = suppressWarnings(
+        with_tz(
+          as.POSIXct(paste(Date, Time), tz = "UTC"),
+          "America/Los_Angeles"
+        )
+      )
+    ) %>%
+    transmute(
+      Date = as.Date(game_datetime),
+      Time = format(game_datetime, "%H:%M"),
+      Away = Away,
+      Home = Home,
+      Location = ifelse(
+        is.na(Venue) | Venue == "",
+        "Unknown",
+        Venue
+      )
+    ) %>%
+    as.data.frame(stringsAsFactors = FALSE)
+}
+
+stopifnot(
+  ncol(sched_mls) == 5,
+  identical(
+    names(sched_mls),
+    c("Date", "Time", "Away", "Home", "Location")
+  )
+)
+
+Schedules$MLS <- sched_mls
+rm(sched_mls, mls_raw)
 
 
