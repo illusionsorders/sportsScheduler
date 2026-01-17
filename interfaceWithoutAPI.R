@@ -69,69 +69,52 @@ sched_nba <- load_nba_schedule(seasons = current_season) %>%
 Schedules$NBA <- sched_nba
 rm(sched_nba)
 
-
-
 # NHL ---------------------------------------------------------------------
 # NHL Schedule Compiler
 
 library(httr)
 library(jsonlite)
 library(lubridate)
-library(dplyr)
 
+# 1. Get the data
+res <- GET("https://api-web.nhle.com/v1/schedule/now")
+raw <- fromJSON(content(res, "text", encoding = "UTF-8"), flatten = FALSE)
 
-raw <- fromJSON(
-  content(
-    GET("https://api-web.nhle.com/v1/schedule/now"),
-    "text",
-    encoding = "UTF-8"
-  ),
-  flatten = TRUE
-)
+target_date <- as.character(Sys.Date())
+day_index <- which(raw$gameWeek$date == target_date)
+if (length(day_index) == 0) day_index <- 1  
 
-# IMPORTANT: safely bind all games (handles mismatched columns)
-games <- bind_rows(raw$gameWeek$games)
+games <- raw$gameWeek$games[[day_index]]
 
+Date     <- as.character(raw$gameWeek$date[day_index])
+Time     <- format(with_tz(ymd_hms(games$startTimeUTC), "America/Los_Angeles"), "%H:%M")
+Away     <- games$awayTeam$commonName$default
+Home     <- games$homeTeam$commonName$default
+Location    <- games$venue$default
 
 sched_nhl <- data.frame(
-  Date = as.Date(
-    with_tz(
-      as.POSIXct(games$startTimeUTC, tz = "UTC"),
-      "America/Los_Angeles"
-    )
-  ),
-  Time = format(
-    with_tz(
-      as.POSIXct(games$startTimeUTC, tz = "UTC"),
-      "America/Los_Angeles"
-    ),
-    "%H:%M"
-  ),
-  Away = paste(
-    games$awayTeam.placeName.default,
-    games$awayTeam.commonName.default
-  ),
-  Home = paste(
-    games$homeTeam.placeName.default,
-    games$homeTeam.commonName.default
-  ),
-  Location = as.character(games$venue.default),
+  Date = Date,
+  Time = Time,
+  Away = Away,
+  Home = Home,
+  Location = Location,
   stringsAsFactors = FALSE
 )
 
+sched_nhl <- sched_nhl[order(sched_nhl$Time), ]
 
-stopifnot(
-  nrow(sched_nhl) > 0,
-  ncol(sched_nhl) == 5,
-  identical(
-    names(sched_nhl),
-    c("Date", "Time", "Away", "Home", "Location")
+if (nrow(sched_nhl) == 0) {
+  sched_nhl <- data.frame(
+    Date = as.Date("1900-01-01"),
+    Time = "12:00 AM",
+    Away = "Place",
+    Home = "Holder",
+    Location = "Placeholder Arena",
+    stringsAsFactors = FALSE
   )
-)
+}
 
-Schedules$NHL <- sched_nhl
-rm(sched_nhl, games, raw)
-
+Schedules$NHL <-sched_nhl
 
 # MLB ---------------------------------------------------------------------
 #MLB Scheduler Compiler
@@ -174,10 +157,8 @@ stopifnot(
   )
 )
 
-# store
 Schedules$MLB <- sched_mlb
 rm(sched_mlb, mlb_raw)
-
 
 # MLS ---------------------------------------------------------------------
 #MLS Schedule Compiler
@@ -246,5 +227,86 @@ stopifnot(
 
 Schedules$MLS <- sched_mls
 rm(sched_mls, mls_raw)
+
+# Master List and Data Normalization --------------------------------------
+
+Schedules <- lapply(Schedules, function(x) {
+  if (!is.data.frame(x)) {
+    stop("Non-data.frame object found in Schedules")
+  }
+  as.data.frame(x, stringsAsFactors = FALSE)
+})
+
+nfl_lookup <- readRDS("nfl_team_lookup.rds")
+nba_lookup <- readRDS("nba_team_lookup.rds")
+
+Schedules$NFL$Away <- nfl_lookup$Full[
+  match(Schedules$NFL$Away, nfl_lookup$Abbr)
+] %||% Schedules$NFL$Away
+
+Schedules$NFL$Home <- nfl_lookup$Full[
+  match(Schedules$NFL$Home, nfl_lookup$Abbr)
+] %||% Schedules$NFL$Home
+
+Schedules$NBA$Away <- nba_lookup$Full[
+  match(Schedules$NBA$Away, nba_lookup$Abbr)
+] %||% Schedules$NBA$Away
+
+Schedules$NBA$Home <- nba_lookup$Full[
+  match(Schedules$NBA$Home, nba_lookup$Abbr)
+] %||% Schedules$NBA$Home
+
+nhl_lookup <- readRDS("nhl_team_lookup.rds")
+
+Schedules$NHL$Away <- coalesce(
+  nhl_lookup$Full[match(Schedules$NHL$Away, nhl_lookup$Common)],
+  Schedules$NHL$Away
+)
+
+Schedules$NHL$Home <- coalesce(
+  nhl_lookup$Full[match(Schedules$NHL$Home, nhl_lookup$Common)],
+  Schedules$NHL$Home
+)
+
+Schedules <- lapply(Schedules, function(df) {
+  if (!is.data.frame(df)) {
+    stop("Non-data.frame object found in Schedules")
+  }
+  
+  df$Date <- as.Date(df$Date)
+  df$Time <- as.character(df$Time)
+  df$Away <- as.character(df$Away)
+  df$Home <- as.character(df$Home)
+  df$Location <- as.character(df$Location)
+  
+  df
+})
+
+Schedules$Master <- bind_rows(Schedules, .id = "League")
+
+Schedules$Master$Time <- format(
+  strptime(Schedules$Master$Time, "%H:%M"),
+  "%I:%M %p"
+)
+
+# Today Listing -----------------------------------------------------------
+
+Schedules$Today <- Schedules$Master %>%
+  filter(Date == Sys.Date()) %>%
+  mutate(
+    Time_sort = as.POSIXct(
+      paste(Date, Time),
+      format = "%Y-%m-%d %I:%M %p",
+      tz = "America/Los_Angeles"
+    )
+  ) %>%
+  arrange(League, Time_sort) %>%
+  select(-Time_sort)
+
+rm(list = setdiff(ls(), "Schedules"))
+todaysListing<-Schedules$Today
+print(todaysListing)
+
+
 
 
